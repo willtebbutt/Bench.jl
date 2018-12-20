@@ -2,9 +2,10 @@ module Bench
 
 using BenchmarkTools, MacroTools
 
-export @benchmarkable
+export @benchmarkable, @bench, @benchset
 
 import Base: haskey, getindex, setindex!, convert
+import BenchmarkTools: BenchmarkGroup
 
 struct SuiteLink
     parent
@@ -14,26 +15,33 @@ haskey(suite::SuiteLink, key) = haskey(suite.data, key)
 getindex(suite::SuiteLink, key...) = getindex(suite.data, key...)
 setindex!(suite, value, key...) = setindex!(suite.data, value, key...)
 function BenchmarkGroup(suite::SuiteLink)
-    # recursively construct a benchmarkgroup from a SuiteLink. Essentially just throw
-    # away information about parents.
+    group = BenchmarkGroup()
+    for (key, value) in suite.data
+        if value isa SuiteLink
+            group[key] = BenchmarkGroup(value)
+        else
+            group[key] = value
+        end
+    end
+    return group
 end
 
 # Please don't touch these.
-const __SUITE_STACK = SuiteLink(nothing, BenchmarkGroup())
-const __ACTIVE_SUITE = Ref(__SUITE_STACK)
+const __SUITES = SuiteLink(nothing, BenchmarkGroup())
+const __ACTIVE_SUITE = Ref(__SUITES)
 
 get_active_suite() = __ACTIVE_SUITE[]
-function set_active_suite!(suite)
+function set_active_suite!(suite::SuiteLink)
     __ACTIVE_SUITE[] = suite
     return nothing
 end
 
 function descend(key)
     active_suite = get_active_suite()
-    if !haskey(active_suite.data, key)
-        active_suite.data[key] = SuiteLink(active_suite, BenchmarkGroup())
+    if !haskey(active_suite, key)
+        active_suite[key] = SuiteLink(active_suite, BenchmarkGroup())
     end
-    set_active_suite!(active_suite.data[key])
+    set_active_suite!(active_suite[key])
     return nothing
 end
 
@@ -43,14 +51,18 @@ function ascend()
 end
 
 macro bench(key, expr)
-    return esc(:(Bench.get_active_suite().data[$key] = @benchmarkable $expr))
+    return esc(quote
+        Bench.get_active_suite()[$key] = @benchmarkable $expr
+        Bench.get_active_suite()[$key]
+    end)
 end
 
 macro benchset(key, code)
     return esc(quote
-        descend($key)
+        Bench.descend($key)
         $code
-        ascend()
+        Bench.ascend()
+        Bench.get_active_suite()[$key]
     end)
 end
 
