@@ -7,7 +7,7 @@ export @benchmarkable, @bench, @benchset
 import Base: haskey, getindex, setindex!, convert
 import BenchmarkTools: BenchmarkGroup
 
-struct SuiteLink
+mutable struct SuiteLink
     parent
     data::BenchmarkGroup
 end
@@ -50,6 +50,11 @@ function ascend()
     return nothing
 end
 
+function clear_suites()
+    __SUITES.data = BenchmarkGroup()
+    set_active_suite!(__SUITES)
+end
+
 macro bench(key, expr)
     return esc(quote
         Bench.get_active_suite()[$key] = @benchmarkable $expr
@@ -62,7 +67,7 @@ macro benchset(key, code)
         Bench.descend($key)
         $code
         Bench.ascend()
-        Bench.get_active_suite()[$key]
+        BenchmarkGroup(Bench.get_active_suite()[$key])
     end)
 end
 
